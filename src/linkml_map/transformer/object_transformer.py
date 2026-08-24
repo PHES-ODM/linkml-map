@@ -1052,8 +1052,23 @@ class ObjectTransformer(Transformer):
             any_of_enums = self._get_any_of_enum_names(source_class_slot, sv)
             if any_of_enums:
                 if source_class_slot.multivalued and isinstance(v, list):
-                    return [self.transform_enum(v1, any_of_enums, source_obj) for v1 in v]
-                return self.transform_enum(v, any_of_enums, source_obj)
+                    transformed = [self.transform_enum(v1, any_of_enums, source_obj) for v1 in v]
+                else:
+                    transformed = self.transform_enum(v, any_of_enums, source_obj)
+                
+                # If any of the transformed values are None, then map them as the non-enum ranges of the slot
+                any_of_nonenums = self._get_any_of_nonenum_names(source_class_slot, sv)
+                if any_of_nonenums:                    
+                    if source_class_slot.multivalued and isinstance(v, list):
+                        for rng in any_of_nonenums:
+                            transformed = [self.map_object(v_orig, rng, target_range) if v_tr is None else v_tr for v_tr, v_orig in zip(transformed, v)]
+                    else:
+                        for rng in any_of_nonenums:
+                            transformed = self.map_object(v, rng, target_range) if transformed is None else transformed
+                            if transformed is not None:
+                                break
+                return transformed
+                    
             # No range and no any_of enums: nothing to recurse into for scalars
             if not isinstance(v, dict | list):
                 return v
@@ -1116,6 +1131,19 @@ class ObjectTransformer(Transformer):
             return []
         all_enums = sv.all_enums()
         return [ao.range for ao in slot.any_of if ao.range in all_enums]
+
+    @staticmethod
+    def _get_any_of_nonenum_names(slot: Any, sv: SchemaView) -> list[str]:
+        """Extract non-enum names from a slot's any_of constraints.
+
+        :param slot: An induced slot definition (from SchemaView.induced_slot).
+        :param sv: Source schema view.
+        :return: List of non-enum names found in any_of, empty if none.
+        """
+        if not hasattr(slot, "any_of") or not slot.any_of:
+            return []
+        all_enums = sv.all_enums()
+        return [ao.range for ao in slot.any_of if ao.range not in all_enums]
 
     def _perform_unit_conversion(
         self,
