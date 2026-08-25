@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
+import math
 
 import yaml
 from asteval import Interpreter
@@ -546,6 +547,15 @@ class ObjectTransformer(Transformer):
             v = self._coerce_datatype(v, target_range)
             v = self._reshape_collection(v, slot_derivation, source_class_slot)
         return v
+    
+    @staticmethod
+    def _is_none_or_nan(val: Any) -> bool:
+        """Determine if a value is None or NaN.
+        
+        :param val: The value to test.
+        :returns: True if val is None or NaN (ie. float("NaN")), False otherwise.
+        """
+        return val is None or (isinstance(val, float) and math.isnan(val))
 
     @staticmethod
     def _nullify_missing_values(value: Any, slot_derivation: SlotDerivation) -> Any:
@@ -1365,6 +1375,8 @@ class ObjectTransformer(Transformer):
                 if pv_deriv.populated_from and source_value in pv_deriv.populated_from:
                     return pv_deriv.name
             if enum_deriv.mirror_source:
+                if self._is_none_or_nan(source_value):
+                    return None
                 return str(source_value)
         return None
 
