@@ -1,6 +1,7 @@
 """Transformers transform objects from one class to another using a transformation specification."""
 
 import logging
+import math
 import warnings
 from abc import ABC
 from collections.abc import Iterator
@@ -953,9 +954,23 @@ class Transformer(ABC):
                 return True
         return False
 
+    @staticmethod
+    def _is_none_or_nan(val: Any) -> bool:
+        """Determine if a value is None or NaN.
+
+        :param val: The value to test.
+        :returns: True if val is None or NaN (ie. float("NaN")), False otherwise.
+        """
+        return val is None or (isinstance(val, float) and math.isnan(val))
+
     def _coerce_datatype(self, v: Any, target_range: str | None) -> Any:
         if target_range is None:
             return v
+        # A null carries no datatype to coerce; str(None) would yield "None"
+        # and int/float would raise. Applies to list/dict elements too, which
+        # is where nulls survive the non-null guard in _derive_slot.
+        if self._is_none_or_nan(v):
+            return None
         if isinstance(v, list):
             return [self._coerce_datatype(v1, target_range) for v1 in v]
         if isinstance(v, dict):

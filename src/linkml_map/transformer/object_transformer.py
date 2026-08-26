@@ -8,7 +8,6 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
-import math
 
 import yaml
 from asteval import Interpreter
@@ -361,6 +360,10 @@ class ObjectTransformer(Transformer):
         Slots with ``hide: true`` are computed (so downstream ``slot()``
         calls can reference them) but excluded from the returned dict.
 
+        A ``source_obj`` that is null (``None`` or NaN) and typed by a scalar
+        type or an enum maps to ``None`` rather than being coerced or
+        stringified.
+
         :param source_obj: source data structure
         :param source_type: source_obj instantiates this (may be class, type, or enum)
         :param target_type: target_obj instantiates this (may be class, type, or enum)
@@ -370,6 +373,10 @@ class ObjectTransformer(Transformer):
         source_type = self._resolve_source_type(source_type, sv)
 
         if source_type in sv.all_types():
+            # Never coerce a null: str(None) would yield "None", and int/float
+            # would raise. A missing source value stays missing.
+            if self._is_none_or_nan(source_obj):
+                return None
             if target_type:
                 if target_type == "string":
                     return str(source_obj)
@@ -547,15 +554,6 @@ class ObjectTransformer(Transformer):
             v = self._coerce_datatype(v, target_range)
             v = self._reshape_collection(v, slot_derivation, source_class_slot)
         return v
-    
-    @staticmethod
-    def _is_none_or_nan(val: Any) -> bool:
-        """Determine if a value is None or NaN.
-        
-        :param val: The value to test.
-        :returns: True if val is None or NaN (ie. float("NaN")), False otherwise.
-        """
-        return val is None or (isinstance(val, float) and math.isnan(val))
 
     @staticmethod
     def _nullify_missing_values(value: Any, slot_derivation: SlotDerivation) -> Any:
@@ -1065,20 +1063,23 @@ class ObjectTransformer(Transformer):
                     transformed = [self.transform_enum(v1, any_of_enums, source_obj) for v1 in v]
                 else:
                     transformed = self.transform_enum(v, any_of_enums, source_obj)
-                
+
                 # If any of the transformed values are None, then map them as the non-enum ranges of the slot
                 any_of_nonenums = self._get_any_of_nonenum_names(source_class_slot, sv)
-                if any_of_nonenums:                    
+                if any_of_nonenums:
                     if source_class_slot.multivalued and isinstance(v, list):
                         for rng in any_of_nonenums:
-                            transformed = [self.map_object(v_orig, rng, target_range) if v_tr is None else v_tr for v_tr, v_orig in zip(transformed, v)]
+                            transformed = [
+                                self.map_object(v_orig, rng, target_range) if v_tr is None else v_tr
+                                for v_tr, v_orig in zip(transformed, v)
+                            ]
                     else:
                         for rng in any_of_nonenums:
                             transformed = self.map_object(v, rng, target_range) if transformed is None else transformed
                             if transformed is not None:
                                 break
                 return transformed
-                    
+
             # No range and no any_of enums: nothing to recurse into for scalars
             if not isinstance(v, dict | list):
                 return v
